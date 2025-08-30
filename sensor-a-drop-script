@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+YOUR_IP="" #Enter IP address
+
+# tools & dir
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y tshark netfilter-persistent
+install -d -m 0755 -o root -g root /var/log/pcap
+
+# stop/remove the old tcpdump unit if present
+systemctl disable --now tcpdump-capture 2>/dev/null || true
+rm -f /etc/systemd/system/tcpdump-capture.service
+
+# NEW: packet capture service using dumpcap (pcapng ring buffer)
+cat >/etc/systemd/system/packet-capture.service <<'EOF'
+[Unit]
+Description=Ring-buffer packet capture with dumpcap (tcp/udp)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# hourly rotation (duration:3600) and keep 336 files (~14 days)
+# -f "tcp or udp" applies a BPF filter
+# -P ensures files are created with predictable names
+ExecStart=/usr/bin/dumpcap -i any -f "tcp or udp" \
+  -b duration:3600 -b files:336 -P \
+  -w /var/log/pcap/capture.pcapng
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now packet-capture
+
+# lock down host firewall: only your SSH is allowed, everything else DROP
+iptables -F
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -s ${YOUR_IP}/32 -j ACCEPT
+iptables -P INPUT DROP
+netfilter-persistent save
+
+# show status & dirs so you can confirm in the portal output
+echo -e "\n== service status (top) =="
+systemctl --no-pager -l status packet-capture | sed -n '1,25p'
+echo -e "\n== recent logs =="
+journalctl -u packet-capture --no-pager -n 30 || true
+echo -e "\n== pcap dir =="
+ls -lh /var/log/pcap || true
+echo -e "\n== iptables INPUT =="
+iptables -S INPUT
