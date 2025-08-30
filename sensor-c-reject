@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ADMIN_IP=""   # your workstation IP for admin SSH
+
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y tshark netfilter-persistent
+
+# pcap ring buffer (1-hour files, keep ~2 weeks @ 336 files)
+install -d -m 0755 /var/log/pcap
+cat >/etc/systemd/system/packet-capture.service <<'EOF'
+[Unit]
+Description=Ring-buffer packet capture with dumpcap (tcp/udp)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart=/usr/bin/dumpcap -i any -f "tcp or udp" -b duration:3600 -b files:336 -P -w /var/log/pcap/capture.pcapng
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now packet-capture
+
+# Firewall: allow loopback + established, allow *your* SSH on 22, REJECT everyone else
+iptables -F
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -s ${ADMIN_IP}/32 -j ACCEPT
+iptables -A INPUT -p tcp -j REJECT --reject-with tcp-reset
+iptables -A INPUT -p udp -j REJECT --reject-with icmp-port-unreachable
+iptables -P INPUT DROP
+netfilter-persistent save
+
+# Quick verify
+echo -e "\n== services =="
+systemctl --no-pager --full status packet-capture | sed -n '1,12p'
+echo -e "\n== listeners =="
+ss -lntp | awk 'NR==1 || /:22[[:space:]]/'
+echo -e "\n== iptables (top) =="
+iptables -L INPUT -n -v --line-numbers | sed -n '1,14p'
+echo -e "\n== pcap dir =="
+ls -lh /var/log/pcap || true
