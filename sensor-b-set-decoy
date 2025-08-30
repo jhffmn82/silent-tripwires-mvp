@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Hard-coded admin IP allowlist
+ADMIN_IP="69.161.55.100"
+
+# Install Docker (for Cowrie) and start it
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io netfilter-persistent
+systemctl enable --now docker
+
+# Allow admin SSH on 22222 BEFORE changing sshd
+iptables -I INPUT 1 -p tcp --dport 22222 -s ${ADMIN_IP}/32 -j ACCEPT
+
+# Move real SSH to 22222 (free up port 22 for the decoy)
+sed -i 's/^#\?Port .*/Port 22222/' /etc/ssh/sshd_config
+systemctl restart ssh
+
+# Host firewall for decoy mode:
+#  - allow loopback + established
+#  - allow admin SSH on 22222 from your IP
+#  - allow port 22 for everyone (Cowrie)
+#  - REJECT the rest; default DROP
+iptables -F
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 22222 -s ${ADMIN_IP}/32 -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+iptables -A INPUT -p tcp -j REJECT --reject-with tcp-reset
+iptables -A INPUT -p udp -j REJECT --reject-with icmp-port-unreachable
+iptables -P INPUT DROP
+netfilter-persistent save
+
+# Run Cowrie (SSH honeypot) on port 22
+docker rm -f cowrie 2>/dev/null || true
+docker run -d --name cowrie --restart unless-stopped -p 22:2222 cowrie/cowrie:latest
+
+# Quick check
+ss -lntp | awk 'NR==1 || /:22[[:space:]]/ || /:22222[[:space:]]/'
+docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
