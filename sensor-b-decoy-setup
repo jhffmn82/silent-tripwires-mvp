@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-YOUR_IP="69.161.55.100"
+YOUR_IP=""
 
 # Packet capture (dumpcap ring buffer: hourly rotation, ~14 days kept)
 apt-get update -y
