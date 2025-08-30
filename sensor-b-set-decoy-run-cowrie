@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Hard-coded admin IP allowlist
-ADMIN_IP="69.161.55.100"
+ADMIN_IP=""
 
 # Install Docker (for Cowrie) and start it
 apt-get update -y
