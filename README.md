@@ -1,2 +1,2 @@
 # silent-tripwires-mvp
-Measure unsolicited Internet traffic and “bounceback” effects using two tiny cloud sensors (DROP vs SSH decoy+REJECT), all from packet traces.
+Silent Tripwires is a lean, solo defensive-security study that observes how quickly fresh cloud IPs are found and how scanners behave when we respond differently: DROP everything vs DECOY on SSH with REJECT for other ports. Over ~14 days we capture packets (tcpdump/tshark) and compute TTFA, handshake completion on 22/tcp, retry within 60s, revisit within 1–7 days, and Top-N ports—no SIEM required. The design is safety-first (egress default-deny, no amplification) and fully reproducible with a tiny Python/pandas analysis.
