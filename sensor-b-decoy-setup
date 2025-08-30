@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+YOUR_IP="69.161.55.100"
+
+# Packet capture (dumpcap ring buffer: hourly rotation, ~14 days kept)
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y tshark netfilter-persistent
+install -d -m 0755 /var/log/pcap
+cat >/etc/systemd/system/packet-capture.service <<'EOF'
+[Unit]
+Description=Ring-buffer packet capture with dumpcap (tcp/udp)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart=/usr/bin/dumpcap -i any -f "tcp or udp" \
+  -b duration:3600 -b files:336 -P \
+  -w /var/log/pcap/capture.pcapng
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now packet-capture
+
+# REJECT baseline (only your IP can SSH)
+iptables -F
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -s ${YOUR_IP}/32 -j ACCEPT
+iptables -A INPUT -p tcp -j REJECT --reject-with tcp-reset
+iptables -A INPUT -p udp -j REJECT --reject-with icmp-port-unreachable
+iptables -P INPUT DROP
+netfilter-persistent save
+
+# Quick status
+systemctl --no-pager -l status packet-capture | sed -n '1,18p'
+iptables -S INPUT
+ls -lh /var/log/pcap | tail
